@@ -431,7 +431,7 @@ class WaveConv3d(nn.Module):
                 self.size = size
         else:
             raise Exception('size: WaveConv2dCwt accepts size of 3D signal is list')
-        self.wavelet = wavelet
+        self.wavelet = wavelet # TODO: assign pywt.Wavelet(self.wavelet) directly
         self.mode = mode
         dummy_data = torch.randn( [*self.size] ).unsqueeze(0)
         mode_data = wavedec3(dummy_data, pywt.Wavelet(self.wavelet), level=self.level, mode=self.mode)
@@ -468,24 +468,26 @@ class WaveConv3d(nn.Module):
         return torch.einsum("ixyz,ioxyz->oxyz", input, weights)
 
     def forward(self, x):
-        xr = torch.zeros(x.shape, device = x.device)
-        for i in range(x.shape[0]):
-            
-            if x.shape[-1] > self.size[-1]:
-                factor = int(np.log2(x.shape[-1] // self.size[-1]))
-                
-                # Compute single tree Discrete Wavelet coefficients using some wavelet
-                x_coeff = wavedec3(x[i, ...], pywt.Wavelet(self.wavelet), level=self.level+factor, mode=self.mode)
-            
-            elif x.shape[-1] < self.size[-1]:
-                factor = int(np.log2(self.size[-1] // x.shape[-1]))
-                
-                # Compute single tree Discrete Wavelet coefficients using some wavelet
-                x_coeff = wavedec3(x[i, ...], pywt.Wavelet(self.wavelet), level=self.level-factor, mode=self.mode)        
-            else:
-                # Compute single tree Discrete Wavelet coefficients using some wavelet
-                x_coeff = wavedec3(x[i, ...], pywt.Wavelet(self.wavelet), level=self.level, mode=self.mode)
-            
+        # TODO: factor = int(np.log2(x.shape[-1] / self.size[-1])) for all cases
+        # Determine factor once for the entire batch (same for all elements)
+        if x.shape[-1] > self.size[-1]:
+            factor = int(np.log2(x.shape[-1] // self.size[-1]))
+        elif x.shape[-1] < self.size[-1]:
+            factor = -int(np.log2(self.size[-1] // x.shape[-1]))
+        else:
+            factor = 0
+
+        level = self.level + factor
+
+        # TODO: just use wavedec3 since I think it supports batches
+        # Create a function for single element processing
+        def process_element(x_element):
+            # Compute single tree Discrete Wavelet coefficients
+            x_coeff = wavedec3(x_element, pywt.Wavelet(self.wavelet), level=level, mode=self.mode)
+
+            assert type(x_coeff) in (tuple, list)
+            x_coeff = list(x_coeff) # it is a tuple but needs to be mutable, no deep copy happens here
+
             # Multiply relevant Wavelet modes
             x_coeff[0] = self.mul3d(x_coeff[0].clone(), self.weights1)
             x_coeff[1]['aad'] = self.mul3d(x_coeff[1]['aad'].clone(), self.weights2)
@@ -495,12 +497,20 @@ class WaveConv3d(nn.Module):
             x_coeff[1]['dad'] = self.mul3d(x_coeff[1]['dad'].clone(), self.weights6)
             x_coeff[1]['dda'] = self.mul3d(x_coeff[1]['dda'].clone(), self.weights7)
             x_coeff[1]['ddd'] = self.mul3d(x_coeff[1]['ddd'].clone(), self.weights8)
-            
+
             # Instantiate higher level coefficients as zeros
             for jj in range(2, self.level + 1):
                 x_coeff[jj] = {key: torch.zeros([*x_coeff[jj][key].shape], device=x.device)
                                 for key in x_coeff[jj].keys()}
-            
-            # Return to physical space        
-            xr[i, ...] = waverec3(x_coeff, pywt.Wavelet(self.wavelet))
+
+            # Return to physical space
+            return waverec3(x_coeff, pywt.Wavelet(self.wavelet))
+
+        # Use vmap to vectorize the single element function across the batch
+        from torch import vmap
+        process_batch = vmap(process_element, in_dims=0, out_dims=0)
+
+        # Process entire batch at once
+        xr = process_batch(x)
+
         return xr
