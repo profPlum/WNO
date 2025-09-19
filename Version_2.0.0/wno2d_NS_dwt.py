@@ -1,8 +1,8 @@
 """
 This code belongs to the paper:
--- Tripura, T., & Chakraborty, S. (2022). Wavelet Neural Operator for solving 
+-- Tripura, T., & Chakraborty, S. (2022). Wavelet Neural Operator for solving
    parametric partialdifferential equations in computational mechanics problems.
-   
+
 This code is for 2-D Navier-Stokes equation (2D time-dependent problem).
 """
 
@@ -19,7 +19,7 @@ from wavelet_convolution import WaveConv2d
 torch.manual_seed(0)
 np.random.seed(0)
 
-# %%    
+# %%
 """ The forward operation """
 class WNO2d(nn.Module):
     def __init__(self, width, level, layers, size, wavelet, in_channel, grid_range, padding=0):
@@ -31,12 +31,12 @@ class WNO2d(nn.Module):
         2. l-layers of the integral operators v(j+1)(x,y) = g(K.v + W.v)(x,y).
             --> W is defined by self.w; K is defined by self.conv.
         3. Project the output of last layer using self.fc1 and self.fc2.
-        
+
         Input : (T_in+1)-channel tensor, solution at t0-t_T and location (u(x,y,t0),...u(x,y,t_T), x,y)
               : shape: (batchsize * x=width * x=height * c=T_in+1)
         Output: Solution of a later timestep (u(x, T_in+1))
               : shape: (batchsize * x=width * x=height * c=1)
-              
+
         Input parameters:
         -----------------
         width : scalar, lifting dimension of input
@@ -55,12 +55,12 @@ class WNO2d(nn.Module):
         self.size = size
         self.wavelet = wavelet
         self.in_channel = in_channel
-        self.grid_range = grid_range 
+        self.grid_range = grid_range
         self.padding = padding
-        
+
         self.conv = nn.ModuleList()
         self.w = nn.ModuleList()
-        
+
         self.fc0 = nn.Linear(self.in_channel, self.width) # input channel is 3: (a(x, y), x, y)
         for i in range( self.layers ):
             self.conv.append( WaveConv2d(self.width, self.width, self.level, self.size, self.wavelet) )
@@ -70,24 +70,24 @@ class WNO2d(nn.Module):
 
     def forward(self, x):
         grid = self.get_grid(x.shape, x.device)
-        x = torch.cat((x, grid), dim=-1)    
+        x = torch.cat((x, grid), dim=-1)
         x = self.fc0(x)                      # Shape: Batch * x * y * Channel
         x = x.permute(0, 3, 1, 2)            # Shape: Batch * Channel * x * y
         if self.padding != 0:
-            x = F.pad(x, [0,self.padding, 0,self.padding]) 
-        
+            x = F.pad(x, [0,self.padding, 0,self.padding])
+
         for index, (convl, wl) in enumerate( zip(self.conv, self.w) ):
-            x = convl(x) + wl(x) 
-            if index != self.layers - 1:     # Final layer has no activation    
+            x = convl(x) + wl(x)
+            if index != self.layers - 1:     # Final layer has no activation
                 x = F.mish(x)                # Shape: Batch * Channel * x * y
-                
+
         if self.padding != 0:
-            x = x[..., :-self.padding, :-self.padding]     
+            x = x[..., :-self.padding, :-self.padding]
         x = x.permute(0, 2, 3, 1)            # Shape: Batch * x * y * Channel
         x = F.gelu( self.fc1(x) )            # Shape: Batch * x * y * Channel
         x = self.fc2(x)                      # Shape: Batch * x * y * Channel
         return x
-    
+
     def get_grid(self, shape, device):
         # The grid of the solution
         batchsize, size_x, size_y = shape[0], shape[1], shape[2]
@@ -166,13 +166,13 @@ for ep in range(epochs):
         loss = 0
         xx = xx.to(device)
         yy = yy.to(device)
-        
+
         for t in range(0, T, step):
             y = yy[..., t:t + step] # t:t+step, retains the third dimension,
 
-            im = model(xx)            
+            im = model(xx)
             loss += myloss(im.reshape(batch_size, -1), y.reshape(batch_size, -1))
-            
+
             if t == 0:
                 pred = im
             else:
@@ -210,7 +210,7 @@ for ep in range(epochs):
 
     train_loss[ep] = train_l2_step/ntrain/(T/step)
     test_loss[ep] = test_l2_step/ntest/(T/step)
-    
+
     t2 = default_timer()
     scheduler.step()
     print('Epoch-{}, Time-{:0.4f}, Train-L2-Batch-{:0.4f}, Train-L2-Step-{:0.4f}, Test-L2-Batch-{:0.4f}, Test-L2-Step-{:0.4f}'
@@ -220,9 +220,9 @@ for ep in range(epochs):
 # %%
 """ Prediction """
 prediction = []
-test_e = []     
+test_e = []
 with torch.no_grad():
-    
+
     index = 0
     for xx, yy in test_loader:
         test_l2_step = 0
@@ -241,18 +241,18 @@ with torch.no_grad():
             else:
                 pred = torch.cat((pred, im), -1)
             xx = torch.cat((xx[..., step:], im), dim=-1)
-            
+
         prediction.append( pred.cpu() )
         test_l2_step += loss.item()
         test_l2_batch += myloss(pred.reshape(1, -1), yy.reshape(1, -1)).item()
         test_e.append( test_l2_step )
         index += 1
-        
+
         print("Batch-{}, Test-loss-step-{:0.6f}, Test-loss-batch-{:0.6f}".format(
             index, test_l2_step/batch_size/(T/step), test_l2_batch) )
-        
+
 prediction = torch.cat((prediction))
-test_e = torch.tensor((test_e))         
+test_e = torch.tensor((test_e))
 print('Mean Testing Error:', 100*torch.mean(test_e).numpy()/batch_size/(T/step), '%')
 
 # %%
@@ -274,27 +274,27 @@ for value in range(test_u.shape[-1]):
         plt.title('t={}s'.format(value+10), color='b', fontsize=18, fontweight='bold')
         plt.xlabel('x',fontweight='bold'); plt.ylabel('y',fontweight='bold')
         plt.xticks(fontweight='bold'); plt.yticks(fontweight='bold');
-        
+
         plt.subplot(4,4, index+1+4)
         plt.imshow(test_u[15,:,:,value], cmap='jet', extent=[0,1,0,1], interpolation='Gaussian')
         plt.colorbar(fraction=0.045)
         plt.xlabel('x',fontweight='bold'); plt.ylabel('y',fontweight='bold')
         plt.xticks(fontweight='bold'); plt.yticks(fontweight='bold');
-        
+
         plt.subplot(4,4, index+1+8)
         plt.imshow(prediction[15,:,:,value], cmap='jet', extent=[0,1,0,1], interpolation='Gaussian')
         plt.colorbar(fraction=0.045)
         plt.xlabel('x',fontweight='bold'); plt.ylabel('y',fontweight='bold')
         plt.xticks(fontweight='bold'); plt.yticks(fontweight='bold');
-        
+
         plt.subplot(4,4, index+1+12)
         plt.imshow(np.abs(test_u[15,:,:,value]-prediction[15,:,:,value]), cmap='jet', extent=[0,1,0,1], interpolation='Gaussian')
-        plt.xlabel('x', fontweight='bold'); plt.ylabel('y', fontweight='bold'); 
+        plt.xlabel('x', fontweight='bold'); plt.ylabel('y', fontweight='bold');
         plt.colorbar(fraction=0.045,format='%.0e')
-        
+
         plt.margins(0)
         index = index + 1
-        
+
 # %%
 """
 For saving the trained model and prediction data
@@ -302,5 +302,5 @@ For saving the trained model and prediction data
 torch.save(model, 'model/WNO_navier_stokes')
 scipy.io.savemat('results/wno_results_navier_stokes.mat', mdict={'test_a':test_a.cpu().numpy(),
                                                     'test_u':test_u.cpu().numpy(),
-                                                    'prediction':prediction.cpu().numpy(),  
+                                                    'prediction':prediction.cpu().numpy(),
                                                     'test_e':test_e.cpu().numpy()})

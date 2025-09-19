@@ -1,4 +1,4 @@
-""" Load required packages 
+""" Load required packages
 
 It requires the packages
 -- "Pytorch Wavelets"
@@ -27,7 +27,7 @@ try:
     from ptwt.conv_transform_3 import wavedec3, waverec3
     from pytorch_wavelets import DWT1D, IDWT1D
     from pytorch_wavelets import DTCWTForward, DTCWTInverse
-    from pytorch_wavelets import DWT, IDWT 
+    from pytorch_wavelets import DWT, IDWT
 except ImportError:
     print('Wavelet convolution requires <Pytorch Wavelets>, <PyWavelets>, <Pytorch Wavelet Toolbox> \n \
                     For Pytorch Wavelet Toolbox: $ pip install ptwt \n \
@@ -35,7 +35,7 @@ except ImportError:
                     For Pytorch Wavelets: $ git clone https://github.com/fbcotter/pytorch_wavelets \n \
                                           $ cd pytorch_wavelets \n \
                                           $ pip install .')
-    
+
 
 """ Def: 1d Wavelet convolutional layer """
 class WaveConv1d(nn.Module):
@@ -44,9 +44,9 @@ class WaveConv1d(nn.Module):
 
         """
         1D Wavelet layer. It does Wavelet Transform, linear transform, and
-        Inverse Wavelet Transform. 
-        
-        Input parameters: 
+        Inverse Wavelet Transform.
+
+        Input parameters:
         -----------------
         in_channels  : scalar, input kernel dimension
         out_channels : scalar, output kernel dimension
@@ -54,8 +54,8 @@ class WaveConv1d(nn.Module):
         size         : scalar, length of input 1D signal
         wavelet      : string, wavelet filter
         mode         : string, padding style for wavelet decomposition
-        
-        It initializes the kernel parameters: 
+
+        It initializes the kernel parameters:
         -------------------------------------
         self.weights1 : tensor, shape-[in_channels * out_channels * x]
                         kernel weights for Approximate wavelet coefficients
@@ -69,14 +69,14 @@ class WaveConv1d(nn.Module):
         if np.isscalar(size):
             self.size = size
         else:
-            raise Exception("size: WaveConv1d accepts signal length in scalar only") 
-        self.wavelet = wavelet 
+            raise Exception("size: WaveConv1d accepts signal length in scalar only")
+        self.wavelet = wavelet
         self.mode = mode
         self.dwt_ = DWT1D(wave=self.wavelet, J=self.level, mode=self.mode)
-        dummy_data = torch.randn( 1,1,self.size ) 
+        dummy_data = torch.randn( 1,1,self.size )
         mode_data, _ = self.dwt_(dummy_data)
         self.modes1 = mode_data.shape[-1]
-        
+
         # Parameter initilization
         self.scale = (1 / (in_channels*out_channels))
         self.weights1 = nn.Parameter(self.scale * torch.rand(in_channels, out_channels, self.modes1))
@@ -89,7 +89,7 @@ class WaveConv1d(nn.Module):
 
         Input Parameters
         ----------------
-        input   : tensor, shape-(batch * in_channel * x ) 
+        input   : tensor, shape-(batch * in_channel * x )
                   1D wavelet coefficients of input signal
         weights : tensor, shape-(in_channel * out_channel * x)
                   kernel weights of corresponding wavelet coefficients
@@ -102,43 +102,43 @@ class WaveConv1d(nn.Module):
 
     def forward(self, x):
         """
-        Input parameters: 
+        Input parameters:
         -----------------
         x : tensor, shape-[Batch * Channel * x]
-        
-        Output parameters: 
+
+        Output parameters:
         ------------------
         x : tensor, shape-[Batch * Channel * x]
         """
         if x.shape[-1] > self.size:
             factor = int(np.log2(x.shape[-1] // self.size))
-            # Compute single tree Discrete Wavelet coefficients using some wavelet  
+            # Compute single tree Discrete Wavelet coefficients using some wavelet
             dwt = DWT1D(wave=self.wavelet, J=self.level+factor, mode=self.mode).to(x.device)
             x_ft, x_coeff = dwt(x)
-            
+
         elif x.shape[-1] < self.size:
             factor = int(np.log2(self.size // x.shape[-1]))
-            # Compute single tree Discrete Wavelet coefficients using some wavelet  
+            # Compute single tree Discrete Wavelet coefficients using some wavelet
             dwt = DWT1D(wave=self.wavelet, J=self.level-factor, mode=self.mode).to(x.device)
             x_ft, x_coeff = dwt(x)
-            
+
         else:
-            # Compute single tree Discrete Wavelet coefficients using some wavelet  
+            # Compute single tree Discrete Wavelet coefficients using some wavelet
             dwt = DWT1D(wave=self.wavelet, J=self.level, mode=self.mode).to(x.device)
             x_ft, x_coeff = dwt(x)
-            
+
         # Instantiate higher level coefficients as zeros
         out_ft = torch.zeros_like(x_ft, device= x.device)
         out_coeff = [torch.zeros_like(coeffs, device= x.device) for coeffs in x_coeff]
-        
+
         # Multiply the final low pass wavelet coefficients
         out_ft = self.mul1d(x_ft, self.weights1)
         # Multiply the final high pass wavelet coefficients
         out_coeff[-1] = self.mul1d(x_coeff[-1].clone(), self.weights2)
-    
+
         # Reconstruct the signal
         idwt = IDWT1D(wave=self.wavelet, mode=self.mode).to(x.device)
-        x = idwt((out_ft, out_coeff)) 
+        x = idwt((out_ft, out_coeff))
         return x
 
 
@@ -148,9 +148,9 @@ class WaveConv2d(nn.Module):
         super(WaveConv2d, self).__init__()
 
         """
-        2D Wavelet layer. It does DWT, linear transform, and Inverse dWT. 
-        
-        Input parameters: 
+        2D Wavelet layer. It does DWT, linear transform, and Inverse dWT.
+
+        Input parameters:
         -----------------
         in_channels  : scalar, input kernel dimension
         out_channels : scalar, output kernel dimension
@@ -158,8 +158,8 @@ class WaveConv2d(nn.Module):
         size         : scalar, length of input 1D signal
         wavelet      : string, wavelet filters
         mode         : string, padding style for wavelet decomposition
-        
-        It initializes the kernel parameters: 
+
+        It initializes the kernel parameters:
         -------------------------------------
         self.weights1 : tensor, shape-[in_channels * out_channels * x * y]
                         kernel weights for Approximate wavelet coefficients
@@ -181,14 +181,14 @@ class WaveConv2d(nn.Module):
                 self.size = size
         else:
             raise Exception('size: WaveConv2dCwt accepts size of 2D signal is list')
-        self.wavelet = wavelet       
+        self.wavelet = wavelet
         self.mode = mode
-        dummy_data = torch.randn( 1,1,*self.size )        
+        dummy_data = torch.randn( 1,1,*self.size )
         dwt_ = DWT(J=self.level, mode=self.mode, wave=self.wavelet)
         mode_data, mode_coef = dwt_(dummy_data)
         self.modes1 = mode_data.shape[-2]
         self.modes2 = mode_data.shape[-1]
-        
+
         # Parameter initilization
         self.scale = (1 / (in_channels * out_channels))
         self.weights1 = nn.Parameter(self.scale * torch.rand(in_channels, out_channels, self.modes1, self.modes2))
@@ -216,27 +216,27 @@ class WaveConv2d(nn.Module):
 
     def forward(self, x):
         """
-        Input parameters: 
+        Input parameters:
         -----------------
         x : tensor, shape-[Batch * Channel * x * y]
-        Output parameters: 
+        Output parameters:
         ------------------
         x : tensor, shape-[Batch * Channel * x * y]
         """
         if x.shape[-1] > self.size[-1]:
             factor = int(np.log2(x.shape[-1] // self.size[-1]))
-            
+
             # Compute single tree Discrete Wavelet coefficients using some wavelet
             dwt = DWT(J=self.level+factor, mode=self.mode, wave=self.wavelet).to(x.device)
             x_ft, x_coeff = dwt(x)
-            
+
         elif x.shape[-1] < self.size[-1]:
             factor = int(np.log2(self.size[-1] // x.shape[-1]))
-            
+
             # Compute single tree Discrete Wavelet coefficients using some wavelet
             dwt = DWT(J=self.level-factor, mode=self.mode, wave=self.wavelet).to(x.device)
             x_ft, x_coeff = dwt(x)
-        
+
         else:
             # Compute single tree Discrete Wavelet coefficients using some wavelet
             dwt = DWT(J=self.level, mode=self.mode, wave=self.wavelet).to(x.device)
@@ -245,20 +245,20 @@ class WaveConv2d(nn.Module):
         # Instantiate higher level coefficients as zeros
         out_ft = torch.zeros_like(x_ft, device= x.device)
         out_coeff = [torch.zeros_like(coeffs, device= x.device) for coeffs in x_coeff]
-        
+
         # Multiply the final approximate Wavelet modes
         out_ft = self.mul2d(x_ft, self.weights1)
         # Multiply the final detailed wavelet coefficients
         out_coeff[-1][:,:,0,:,:] = self.mul2d(x_coeff[-1][:,:,0,:,:].clone(), self.weights2)
         out_coeff[-1][:,:,1,:,:] = self.mul2d(x_coeff[-1][:,:,1,:,:].clone(), self.weights3)
         out_coeff[-1][:,:,2,:,:] = self.mul2d(x_coeff[-1][:,:,2,:,:].clone(), self.weights4)
-        
-        # Return to physical space        
+
+        # Return to physical space
         idwt = IDWT(mode=self.mode, wave=self.wavelet).to(x.device)
         x = idwt((out_ft, out_coeff))
         return x
 
-    
+
 """ Def: 2d Wavelet convolutional layer (slim continuous) """
 class WaveConv2dCwt(nn.Module):
     def __init__(self, in_channels, out_channels, level, size, wavelet1, wavelet2):
@@ -267,9 +267,9 @@ class WaveConv2dCwt(nn.Module):
         """
         !! It is computationally expensive than the discrete "WaveConv2d" !!
         2D Wavelet layer. It does SCWT (Slim continuous wavelet transform),
-                                linear transform, and Inverse dWT. 
-        
-        Input parameters: 
+                                linear transform, and Inverse dWT.
+
+        Input parameters:
         -----------------
         in_channels  : scalar, input kernel dimension
         out_channels : scalar, output kernel dimension
@@ -278,8 +278,8 @@ class WaveConv2dCwt(nn.Module):
         wavelet1     : string, Specifies the first level biorthogonal wavelet filters
         wavelet2     : string, Specifies the second level quarter shift filters
         mode         : string, padding style for wavelet decomposition
-        
-        It initializes the kernel parameters: 
+
+        It initializes the kernel parameters:
         -------------------------------------
         self.weights0 : tensor, shape-[in_channels * out_channels * x * y]
                         kernel weights for Approximate wavelet coefficients
@@ -300,15 +300,15 @@ class WaveConv2dCwt(nn.Module):
         else:
             raise Exception('size: WaveConv2dCwt accepts size of 2D signal is list')
         self.wavelet_level1 = wavelet1
-        self.wavelet_level2 = wavelet2        
-        dummy_data = torch.randn( 1,1,*self.size ) 
+        self.wavelet_level2 = wavelet2
+        dummy_data = torch.randn( 1,1,*self.size )
         dwt_ = DTCWTForward(J=self.level, biort=self.wavelet_level1, qshift=self.wavelet_level2)
         mode_data, mode_coef = dwt_(dummy_data)
         self.modes1 = mode_data.shape[-2]
         self.modes2 = mode_data.shape[-1]
         self.modes21 = mode_coef[-1].shape[-3]
         self.modes22 = mode_coef[-1].shape[-2]
-        
+
         # Parameter initilization
         self.scale = (1 / (in_channels * out_channels))
         self.weights0 = nn.Parameter(self.scale * torch.rand(in_channels, out_channels, self.modes1, self.modes2))
@@ -345,38 +345,38 @@ class WaveConv2dCwt(nn.Module):
 
     def forward(self, x):
         """
-        Input parameters: 
+        Input parameters:
         -----------------
         x : tensor, shape-[Batch * Channel * x * y]
-        Output parameters: 
+        Output parameters:
         ------------------
         x : tensor, shape-[Batch * Channel * x * y]
-        """      
+        """
         if x.shape[-1] > self.size[-1]:
             factor = int(np.log2(x.shape[-1] // self.size[-1]))
-            
+
             # Compute dual tree continuous Wavelet coefficients
             cwt = DTCWTForward(J=self.level+factor, biort=self.wavelet_level1, qshift=self.wavelet_level2).to(x.device)
             x_ft, x_coeff = cwt(x)
-            
+
         elif x.shape[-1] < self.size[-1]:
             factor = int(np.log2(self.size[-1] // x.shape[-1]))
-            
+
             # Compute dual tree continuous Wavelet coefficients
             cwt = DTCWTForward(J=self.level-factor, biort=self.wavelet_level1, qshift=self.wavelet_level2).to(x.device)
-            x_ft, x_coeff = cwt(x)            
+            x_ft, x_coeff = cwt(x)
         else:
-            # Compute dual tree continuous Wavelet coefficients 
+            # Compute dual tree continuous Wavelet coefficients
             cwt = DTCWTForward(J=self.level, biort=self.wavelet_level1, qshift=self.wavelet_level2).to(x.device)
             x_ft, x_coeff = cwt(x)
-        
+
         # Instantiate higher level coefficients as zeros
         out_ft = torch.zeros_like(x_ft, device= x.device)
         out_coeff = [torch.zeros_like(coeffs, device= x.device) for coeffs in x_coeff]
-        
+
         # Multiply the final approximate Wavelet modes
         out_ft = self.mul2d(x_ft[:, :, :self.modes1, :self.modes2], self.weights0)
-        # Multiply the final detailed wavelet coefficients        
+        # Multiply the final detailed wavelet coefficients
         out_coeff[-1][:,:,0,:,:,0] = self.mul2d(x_coeff[-1][:,:,0,:,:,0].clone(), self.weights15r)
         out_coeff[-1][:,:,0,:,:,1] = self.mul2d(x_coeff[-1][:,:,0,:,:,1].clone(), self.weights15c)
         out_coeff[-1][:,:,1,:,:,0] = self.mul2d(x_coeff[-1][:,:,1,:,:,0].clone(), self.weights45r)
@@ -388,23 +388,23 @@ class WaveConv2dCwt(nn.Module):
         out_coeff[-1][:,:,4,:,:,0] = self.mul2d(x_coeff[-1][:,:,4,:,:,0].clone(), self.weights135r)
         out_coeff[-1][:,:,4,:,:,1] = self.mul2d(x_coeff[-1][:,:,4,:,:,1].clone(), self.weights135c)
         out_coeff[-1][:,:,5,:,:,0] = self.mul2d(x_coeff[-1][:,:,5,:,:,0].clone(), self.weights165r)
-        out_coeff[-1][:,:,5,:,:,1] = self.mul2d(x_coeff[-1][:,:,5,:,:,1].clone(), self.weights165c)        
-        
+        out_coeff[-1][:,:,5,:,:,1] = self.mul2d(x_coeff[-1][:,:,5,:,:,1].clone(), self.weights165c)
+
         # Reconstruct the signal
         icwt = DTCWTInverse(biort=self.wavelet_level1, qshift=self.wavelet_level2).to(x.device)
         x = icwt((out_ft, out_coeff))
         return x
-    
-    
+
+
 """ Def: 3d Wavelet convolutional layer """
 class WaveConv3d(nn.Module):
     def __init__(self, in_channels, out_channels, level, size, wavelet='db4', mode='periodic'):
         super(WaveConv3d, self).__init__()
 
         """
-        3D Wavelet layer. It does 3D DWT, linear transform, and Inverse dWT.    
-        
-        Input parameters: 
+        3D Wavelet layer. It does 3D DWT, linear transform, and Inverse dWT.
+
+        Input parameters:
         -----------------
         in_channels  : scalar, input kernel dimension
         out_channels : scalar, output kernel dimension
@@ -412,13 +412,13 @@ class WaveConv3d(nn.Module):
         size         : scalar, length of input 1D signal
         wavelet      : string, Specifies the first level biorthogonal wavelet filters
         mode         : string, padding style for wavelet decomposition
-        
-        It initializes the kernel parameters: 
+
+        It initializes the kernel parameters:
         -------------------------------------
         self.weights0 : tensor, shape-[in_channels * out_channels * x * y * z]
                         kernel weights for Approximate wavelet coefficients
         self.weights_ : tensor, shape-[in_channels * out_channels * x * y * z]
-                        kernel weights for Detailed wavelet coefficients 
+                        kernel weights for Detailed wavelet coefficients
         """
 
         self.in_channels = in_channels

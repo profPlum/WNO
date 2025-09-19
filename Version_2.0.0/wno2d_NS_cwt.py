@@ -1,9 +1,11 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 This code belongs to the paper:
--- Tripura, T., & Chakraborty, S. (2022). Wavelet Neural Operator for solving 
-   parametric partialdifferential equations in computational mechanics problems.
-   
--- This code is for weekly forecast of 2m air temperature (time-dependent problem).
+-- Tripura, T., & Chakraborty, S. (2022). Wavelet neural operator: a neural
+   operator for parametric partial differential equations. arXiv preprint arXiv:2205.02191.
+
+This code is for 2-D Navier-Stokes equation (2D time-dependent problem).
 """
 
 import torch
@@ -13,8 +15,6 @@ import torch.nn.functional as F
 
 import matplotlib.pyplot as plt
 from utils import *
-
-import xarray as xr
 from timeit import default_timer
 from wavelet_convolution import WaveConv2dCwt
 
@@ -24,7 +24,7 @@ np.random.seed(0)
 # %%
 """ The forward operation """
 class WNO2d(nn.Module):
-    def __init__(self, width, level, layers, size, wavelet, in_channel, xgrid_range, ygrid_range, padding=0):
+    def __init__(self, width, level, layers, size, wavelet, in_channel, grid_range, padding=0):
         super(WNO2d, self).__init__()
 
         """
@@ -33,19 +33,19 @@ class WNO2d(nn.Module):
         2. l-layers of the integral operators v(j+1)(x,y) = g(K.v + W.v)(x,y).
             --> W is defined by self.w; K is defined by self.conv.
         3. Project the output of last layer using self.fc1 and self.fc2.
-        
-        Input : 3-channel tensor, Initial input and location (a(x,y), x,y)
-              : shape: (batchsize * x=width * x=height * c=3)
-        Output: Solution of a later timestep (u(x,y))
+
+        Input : (T_in+1)-channel tensor, solution at t0-t_T and location (u(x,y,t0),...u(x,y,t_T), x,y)
+              : shape: (batchsize * x=width * x=height * c=T_in+1)
+        Output: Solution of a later timestep (u(x, T_in+1))
               : shape: (batchsize * x=width * x=height * c=1)
-              
+
         Input parameters:
         -----------------
         width : scalar, lifting dimension of input
         level : scalar, number of wavelet decomposition
         layers: scalar, number of wavelet kernel integral blocks
         size  : list with 2 elements (for 2D), image size
-        wavelet: list of strings for 2D, wavelet filter
+        wavelet   : list of strings, first and second level continuous wavelet filters
         in_channel: scalar, channels in input including grid
         grid_range: list with 2 elements (for 2D), right supports of 2D domain
         padding   : scalar, size of zero padding
@@ -58,13 +58,12 @@ class WNO2d(nn.Module):
         self.wavelet1 = wavelet[0]
         self.wavelet2 = wavelet[1]
         self.in_channel = in_channel
-        self.xgrid_range = xgrid_range
-        self.ygrid_range = ygrid_range
+        self.grid_range = grid_range
         self.padding = padding
-        
+
         self.conv = nn.ModuleList()
         self.w = nn.ModuleList()
-        
+
         self.fc0 = nn.Linear(self.in_channel, self.width) # input channel is 3: (a(x, y), x, y)
         for i in range( self.layers ):
             self.conv.append( WaveConv2dCwt(self.width, self.width, self.level, self.size,
@@ -75,102 +74,84 @@ class WNO2d(nn.Module):
 
     def forward(self, x):
         grid = self.get_grid(x.shape, x.device)
-        x = torch.cat((x, grid), dim=-1)    
+        x = torch.cat((x, grid), dim=-1)
         x = self.fc0(x)                      # Shape: Batch * x * y * Channel
         x = x.permute(0, 3, 1, 2)            # Shape: Batch * Channel * x * y
         if self.padding != 0:
-            x = F.pad(x, [0,self.padding, 0,self.padding]) 
-        
+            x = F.pad(x, [0,self.padding, 0,self.padding])
+
         for index, (convl, wl) in enumerate( zip(self.conv, self.w) ):
-            x = convl(x) + wl(x) 
-            if index != self.layers - 1:     # Final layer has no activation    
-                x = F.mish(x)                # Shape: Batch * Channel * x * y
-                
+            x = convl(x) + wl(x)
+            if index != self.layers - 1:     # Final layer has no activation
+                x = F.gelu(x)                # Shape: Batch * Channel * x * y
+
         if self.padding != 0:
-            x = x[..., :-self.padding, :-self.padding]     
+            x = x[..., :-self.padding, :-self.padding]
         x = x.permute(0, 2, 3, 1)            # Shape: Batch * x * y * Channel
         x = F.gelu( self.fc1(x) )            # Shape: Batch * x * y * Channel
         x = self.fc2(x)                      # Shape: Batch * x * y * Channel
         return x
-    
+
     def get_grid(self, shape, device):
         # The grid of the solution
         batchsize, size_x, size_y = shape[0], shape[1], shape[2]
-        gridx = torch.tensor(np.linspace(self.xgrid_range[0], self.xgrid_range[1], size_x), dtype=torch.float)
+        gridx = torch.tensor(np.linspace(0, self.grid_range[0], size_x), dtype=torch.float)
         gridx = gridx.reshape(1, size_x, 1, 1).repeat([batchsize, 1, size_y, 1])
-        gridy = torch.tensor(np.linspace(self.ygrid_range[0], self.ygrid_range[1], size_y), dtype=torch.float)
+        gridy = torch.tensor(np.linspace(0, self.grid_range[1], size_y), dtype=torch.float)
         gridy = gridy.reshape(1, 1, size_y, 1).repeat([batchsize, size_x, 1, 1])
-        return torch.cat((gridx, gridy), dim=-1).to(device) 
+        return torch.cat((gridx, gridy), dim=-1).to(device)
 
 # %%
 """ Model configurations """
 
-PATH = 'data/ERA5_daily_average_5years.grib'
-ntrain = 270
-ntest = 6
+PATH = 'data/ns_V1e-3_N5000_T50.mat'
+ntrain = 1000
+ntest = 100
 
-batch_size = 3
+batch_size = 20
 learning_rate = 0.001
 
 epochs = 500
-step_size = 50
-gamma = 0.75
+step_size = 50   # weight-decay step size
+gamma = 0.5      # weight-decay rate
 
 wavelet = ['near_sym_b', 'qshift_b']  # wavelet basis function
-level = 2        # lavel of wavelet decomposition
-width = 20       # uplifting dimension
+level = 4        # lavel of wavelet decomposition
+width = 48       # uplifting dimension
 layers = 4       # no of wavelet layers
 
-sub = 2**4 # 2**4 for 4^o, # 2**3 for 2^o
-h = int(((721 - 1)/sub))
-s = int(((1441 - 1)/sub))
+sub = 1          # subsampling rate
+h = 64           # total grid size divided by the subsampling rate
+grid_range = [1, 1]
+in_channel = 12  # input channel is 12: (10 for a(x,t1-t10), 2 for x)
 
-xgrid_range = [0, 360]          # The grid boundary in x direction
-ygrid_range = [90, -90]          # The grid boundary in y direction
-in_channel = 9  # input channel is 12: (10 for a(x,t1-t10), 2 for x)
-
-T = 7
-step = 1
+T_in = 10
+T = 40           # No of prediction steps
+step = 1         # Look-ahead step size
 
 # %%
 """ Read data """
 
-ds = xr.open_dataset(PATH, engine='cfgrib')
-data = np.array(ds["t2m"])
-data = torch.tensor(data)
-# data = data[:,:720,:]
+reader = MatReader(PATH)
+data = reader.read_field('u')
+train_a = data[:ntrain,::sub,::sub,:T_in]
+train_u = data[:ntrain,::sub,::sub,T_in:T+T_in]
 
-Tn = 7*int(1937/7)
-x_data = data[:-1, :, :]
-y_data = data[1:, :, :]
+test_a = data[-ntest:,::sub,::sub,:T_in]
+test_u = data[-ntest:,::sub,::sub,T_in:T+T_in]
 
-x_data = x_data[:Tn, :, :]
-y_data = y_data[:Tn, :, :]
+train_a = train_a.reshape(ntrain,h,h,T_in)
+test_a = test_a.reshape(ntest,h,h,T_in)
 
-x_data = x_data.reshape(1932,721,1440,1)
-x_data = list(torch.split(x_data, int(1932/7), dim=0))
-x_data = torch.cat((x_data), dim=3)
-
-y_data = y_data.reshape(1932,721,1440,1)
-y_data = list(torch.split(y_data, int(1932/7), dim=0))
-y_data = torch.cat((y_data), dim=3)
-
-# %%
-x_train = x_data[:ntrain, ::sub, ::sub, :]
-y_train = y_data[:ntrain, ::sub, ::sub, :]
-
-x_test = y_data[-ntest:, ::sub, ::sub, :]
-y_test = y_data[-ntest:, ::sub, ::sub, :]
-
-train_loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(x_train, y_train),
+train_loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(train_a, train_u),
                                            batch_size=batch_size, shuffle=True)
-test_loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(x_test, y_test),
+test_loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(test_a, test_u),
                                           batch_size=batch_size, shuffle=False)
 
 # %%
 """ The model definition """
-model = WNO2d(width=width, level=level, layers=layers, size=[h,s], wavelet=wavelet,
-              in_channel=in_channel, xgrid_range=xgrid_range, ygrid_range=ygrid_range, padding=2).to(device)
+model = WNO2d(width=width, level=level, layers=layers, size=[h,h], wavelet=wavelet,
+              in_channel=in_channel, grid_range=grid_range).to(device)
 print(count_params(model))
 
 """ Training and testing """
@@ -189,13 +170,13 @@ for ep in range(epochs):
         loss = 0
         xx = xx.to(device)
         yy = yy.to(device)
-        
+
         for t in range(0, T, step):
             y = yy[..., t:t + step] # t:t+step, retains the third dimension,
 
-            im = model(xx)            
+            im = model(xx)
             loss += myloss(im.reshape(batch_size, -1), y.reshape(batch_size, -1))
-            
+
             if t == 0:
                 pred = im
             else:
@@ -233,7 +214,7 @@ for ep in range(epochs):
 
     train_loss[ep] = train_l2_step/ntrain/(T/step)
     test_loss[ep] = test_l2_step/ntest/(T/step)
-    
+
     t2 = default_timer()
     scheduler.step()
     print('Epoch-{}, Time-{:0.4f}, Train-L2-Batch-{:0.4f}, Train-L2-Step-{:0.4f}, Test-L2-Batch-{:0.4f}, Test-L2-Step-{:0.4f}'
@@ -243,9 +224,9 @@ for ep in range(epochs):
 # %%
 """ Prediction """
 prediction = []
-test_e = []     
+test_e = []
 with torch.no_grad():
-    
+
     index = 0
     for xx, yy in test_loader:
         test_l2_step = 0
@@ -264,60 +245,68 @@ with torch.no_grad():
             else:
                 pred = torch.cat((pred, im), -1)
             xx = torch.cat((xx[..., step:], im), dim=-1)
-            
+
         prediction.append( pred.cpu() )
         test_l2_step += loss.item()
         test_l2_batch += myloss(pred.reshape(1, -1), yy.reshape(1, -1)).item()
         test_e.append( test_l2_step )
         index += 1
-        
+
         print("Batch-{}, Test-loss-step-{:0.6f}, Test-loss-batch-{:0.6f}".format(
             index, test_l2_step/batch_size/(T/step), test_l2_batch) )
-        
+
 prediction = torch.cat((prediction))
-test_e = torch.tensor((test_e))         
+test_e = torch.tensor((test_e))
 print('Mean Testing Error:', 100*torch.mean(test_e).numpy()/batch_size/(T/step), '%')
 
 # %%
+""" Plotting """
 plt.rcParams["font.family"] = "serif"
 plt.rcParams['font.size'] = 14
-plt.rcParams['font.weight'] = 'bold'
 
-figure1 = plt.figure(figsize = (18, 16))
-plt.subplots_adjust(hspace=0.05, wspace=0.18)
-batch_no = 5
+figure1, ax = plt.subplots(nrows=4, ncols=8, figsize = (20, 10))
+plt.subplots_adjust(hspace=0.5)
+sample = 15
 index = 0
-for tvalue in range(10):
-    if tvalue < 6: #(printing till Mon.-Sat.)
-        ###
-        plt.subplot(4,3, index+1)
-        plt.imshow(y_test.numpy()[batch_no,:,:,tvalue], cmap='gist_ncar', interpolation='Gaussian')
-        plt.title('Day-{}'.format(tvalue+1)); plt.xlabel('Longitude ($^{\circ}$)', fontweight='bold'); 
-        plt.grid(True)
-        if index == 0 or index == 3:
-            plt.ylabel('Truth \n Latitude ($^{\circ}$)', fontweight='bold')
+for value in range(T):
+    if value % 5 == 0:
+        if index == 0:
+            ax[0, index].imshow(test_a.numpy()[sample,:,:,0], cmap='jet', extent=[0,1,0,1], interpolation='Gaussian')
+            ax[0, index].set_title('t={}s'.format(value+10), color='b', fontsize=18, fontweight='bold')
+            ax[0, index].set_ylabel('IC', rotation=90, color='r', fontsize=20)
+
+            ax[1, index].imshow(test_u[sample,:,:,value], cmap='jet', extent=[0,1,0,1], interpolation='Gaussian')
+            ax[1, index].set_ylabel('Prediction', rotation=90, color='b', fontsize=20)
+
+            ax[2, index].imshow(prediction[sample,:,:,value], cmap='jet', extent=[0,1,0,1], interpolation='Gaussian')
+            ax[2, index].set_ylabel('Truth', rotation=90, color='g', fontsize=20)
+
+            ax[3, index].imshow(np.abs(test_u[sample,:,:,value]-prediction[sample,:,:,value]),
+                                     vmin=0, vmax=0.5, cmap='jet', extent=[0,1,0,1], interpolation='Gaussian')
+            ax[3, index].set_ylabel('Error', rotation=90, color='purple', fontsize=20)
         else:
-            plt.ylabel('Latitude ($^{\circ}$)', fontweight='bold')
-        
-        ###
-        plt.subplot(4,3, index+1+6)
-        plt.imshow(prediction[batch_no,:,:,tvalue], cmap='gist_ncar', interpolation='Gaussian')
-        plt.title('Day-{}'.format(tvalue+1)) 
-        plt.xlabel('Longitude ($^{\circ}$)', fontweight='bold');
-        plt.grid(True)
-        if index == 0 or index == 3:
-            plt.ylabel('Prediction \n Latitude ($^{\circ}$)', fontweight='bold')
-        else:
-            plt.ylabel('Latitude ($^{\circ}$)', fontweight='bold')
+            ax[0, index].imshow(test_a.numpy()[sample,:,:,0], cmap='jet', extent=[0,1,0,1], interpolation='Gaussian')
+            ax[0, index].set_title('t={}s'.format(value+10), color='b', fontsize=18, fontweight='bold')
+
+            ax[1, index].imshow(test_u[sample,:,:,value], cmap='jet', extent=[0,1,0,1], interpolation='Gaussian')
+
+            ax[2, index].imshow(prediction[sample,:,:,value], cmap='jet', extent=[0,1,0,1], interpolation='Gaussian')
+
+            if index == 7:
+                im = ax[3, index].imshow(np.abs(test_u[sample,:,:,value]-prediction[sample,:,:,value]),
+                                         vmin=0, vmax=0.5, cmap='jet', extent=[0,1,0,1], interpolation='Gaussian')
+                plt.colorbar(im, ax=ax[3, index], fraction=0.045)
+            else:
+                ax[3, index].imshow(np.abs(test_u[sample,:,:,value]-prediction[sample,:,:,value]),
+                                         vmin=0, vmax=0.5, cmap='jet', extent=[0,1,0,1], interpolation='Gaussian')
         index = index + 1
-        
+
 # %%
 """
 For saving the trained model and prediction data
 """
-torch.save(model, 'model/model_wno_ERA5_time')
-scipy.io.savemat('results/wno_results_ERA5_time.mat', mdict={'x_test':x_test.cpu().numpy(),
-                                                    'y_test':y_test.cpu().numpy(),
-                                                    'pred':prediction.cpu().numpy(),  
+torch.save(model, 'model/WNO_cwt_navier_stokes_40s')
+scipy.io.savemat('results/wno_cwt_results_navier_stokes_40s.mat', mdict={'test_a':test_a.cpu().numpy(),
+                                                    'test_u':test_u.cpu().numpy(),
+                                                    'prediction':prediction.cpu().numpy(),
                                                     'test_e':test_e.cpu().numpy()})
-

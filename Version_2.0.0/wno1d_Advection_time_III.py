@@ -1,9 +1,9 @@
 """
 This code belongs to the paper:
--- Tripura, T., & Chakraborty, S. (2022). Wavelet Neural Operator for solving 
+-- Tripura, T., & Chakraborty, S. (2022). Wavelet Neural Operator for solving
    parametric partialdifferential equations in computational mechanics problems.
-   
--- This code is for 1-D Burgers' equation with discontinuous field (time-dependent problem).
+
+-- This code is for 1-D wave advection equation (time-dependent problem).
 """
 
 import numpy as np
@@ -31,12 +31,12 @@ class WNO1d(nn.Module):
         2. l-layers of the integral operators v(j+1)(x) = g(K.v + W.v)(x).
             --> W is defined by self.w; K is defined by self.conv.
         3. Project the output of last layer using self.fc1 and self.fc2.
-        
+
         Input : (T_in+1)-channel tensor, first T_in step and location (u(x,t0),...u(x,t_T), x)
               : shape: (batchsize * x=s * c=T_in+1)
         Output: Solution of a later timestep (u(x, T_in+1))
               : shape: (batchsize * x=s * c=1)
-        
+
         Input parameters:
         -----------------
         width : scalar, lifting dimension of input
@@ -55,12 +55,12 @@ class WNO1d(nn.Module):
         self.size = size
         self.wavelet = wavelet
         self.in_channel = in_channel
-        self.grid_range = grid_range 
+        self.grid_range = grid_range
         self.padding = padding
-        
+
         self.conv = nn.ModuleList()
         self.w = nn.ModuleList()
-        
+
         self.fc0 = nn.Linear(self.in_channel, self.width) # input channel is 2: (a(x), x)
         for i in range( self.layers ):
             self.conv.append( WaveConv1d(self.width, self.width, self.level, self.size, self.wavelet) )
@@ -74,15 +74,15 @@ class WNO1d(nn.Module):
         x = self.fc0(x)              # Shape: Batch * x * Channel
         x = x.permute(0, 2, 1)       # Shape: Batch * Channel * x
         if self.padding != 0:
-            x = F.pad(x, [0,self.padding]) 
-        
+            x = F.pad(x, [0,self.padding])
+
         for index, (convl, wl) in enumerate( zip(self.conv, self.w) ):
             if index != self.layers - 1:
-                x = convl(x) + wl(x) 
-                x = F.mish(x)        # Shape: Batch * Channel * x 
-                
+                x = convl(x) + wl(x)
+                x = F.mish(x)        # Shape: Batch * Channel * x
+
         if self.padding != 0:
-            x = x[..., :-self.padding] 
+            x = x[..., :-self.padding]
         x = x.permute(0, 2, 1)       # Shape: Batch * x * Channel
         x = F.gelu( self.fc1(x) )    # Shape: Batch * x * Channel
         x = self.fc2(x)              # Shape: Batch * x * Channel
@@ -99,9 +99,10 @@ class WNO1d(nn.Module):
 # %%
 """ Model configurations """
 
-PATH = 'data/Burger_data/pde_burger/burgers_data_512_51.mat'
-ntrain = 480
-ntest = 20
+PATH_train = 'data/train_IC2.npz'
+PATH_test = 'data/test_IC2.npz'
+ntrain = 1000
+ntest = 100
 
 batch_size = 20
 learning_rate = 0.001
@@ -111,32 +112,38 @@ step_size = 50   # weight-decay step size
 gamma = 0.5      # weight-decay rate
 
 wavelet = 'db6'  # wavelet basis function
-level = 6        # lavel of wavelet decomposition
-width = 40       # uplifting dimension
+level = 3        # lavel of wavelet decomposition
+width = 80       # uplifting dimension
 layers = 4       # no of wavelet layers
 
 sub = 1          # subsampling rate
-h = 512          # total grid size divided by the subsampling rate
+h = 40           # total grid size divided by the subsampling rate
 grid_range = 1
-in_channel = 21  # input channel is 21: (20 for a(x,t1-t20), 1 for x)
+in_channel = 40  # input channel is 21: (20 for a(x,t1-t20), 1 for x)
 
-T_in = 20        # No of initial temporal-samples
-T = 30           # No of prediction steps
+T = 39           # No of prediction steps
 step = 1         # Look-ahead step size
 
 # %%
 """ Read data """
-dataloader = MatReader(PATH)
-data = dataloader.read_field('sol') # N x Nx x Nt
 
-x_train = data[:ntrain, ::sub, :T_in] 
-y_train = data[:ntrain, ::sub, T_in:T_in+T] 
+data = np.load(PATH_train)
+x, t, u_train = data["x"], data["t"], data["u"]  # N x nt x nx
+x_train = u_train[:ntrain, :-1, :]  # N x nx
+y_train = u_train[:ntrain, 1:, :] # one step ahead,
+x_train = torch.from_numpy(x_train)
+y_train = torch.from_numpy(y_train)
+x_train = x_train.permute(0,2,1)
+y_train = y_train.permute(0,2,1)
 
-x_test = data[-ntest:, ::sub, :T_in] 
-y_test = data[-ntest:, ::sub, T_in:T_in+T] 
-
-x_train = x_train.reshape(ntrain,h,T_in)
-x_test = x_test.reshape(ntest,h,T_in)
+data = np.load(PATH_test)
+x, t, u_test = data["x"], data["t"], data["u"]  # N x nt x nx
+x_test = u_test[:ntest, :-1, :]  # N x nx
+y_test = u_test[:ntest, 1:, :] # one step ahead,
+x_test = torch.from_numpy(x_test)
+y_test = torch.from_numpy(y_test)
+x_test = x_test.permute(0,2,1)
+y_test = y_test.permute(0,2,1)
 
 train_loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(x_train, y_train),
                                            batch_size=batch_size, shuffle=True)
@@ -165,7 +172,7 @@ for ep in range(epochs):
         loss = 0
         xx = xx.to(device)
         yy = yy.to(device)
-        
+
         for t in range(0, T, step):
             y = yy[..., t:t + step]
             im = model(xx)
@@ -175,7 +182,7 @@ for ep in range(epochs):
             else:
                 pred = torch.cat((pred, im), -1)
             xx = torch.cat((xx[..., step:], im), dim=-1)
-            
+
         train_l2_step += loss.item()
         l2_full = myloss(pred.reshape(batch_size, -1), yy.reshape(batch_size, -1))
         train_l2_batch += l2_full.item()
@@ -207,13 +214,13 @@ for ep in range(epochs):
 
     train_loss[ep] = train_l2_step/ntrain/(T/step)
     test_loss[ep] = test_l2_step/ntest/(T/step)
-    
+
     t2 = default_timer()
     scheduler.step()
     print('Epoch-{}, Time-{:0.4f}, Train-L2-Batch-{:0.4f}, Train-L2-Step-{:0.4f}, Test-L2-Batch-{:0.4f}, Test-L2-Step-{:0.4f}'
           .format(ep, t2-t1, train_l2_step/ntrain/(T/step), train_l2_batch/ntrain, test_l2_step/ntest/(T/step),
           test_l2_batch/ntest))
-    
+
 # %%
 """ Prediction """
 prediction = []
@@ -236,23 +243,24 @@ with torch.no_grad():
             else:
                 pred = torch.cat((pred, im), -1)
             xx = torch.cat((xx[..., step:], im), dim=-1)
-            
+
         prediction.append( pred )
         test_l2_step = loss.item()
         test_l2_batch = myloss(pred.reshape(1, -1), yy.reshape(1, -1)).item()
-        
+
         test_e.append( test_l2_step/len(test_loader)/(T/step) )
         index += 1
-        
+
         print("Batch-{}, Test-loss-step-{:0.6f}, Test-loss-batch-{:0.6f}".format(
             index, test_l2_step/len(test_loader)/(T/step), test_l2_batch/len(test_loader)) )
-        
+
 prediction = torch.cat((prediction))
-test_e = torch.tensor((test_e))  
+test_e = torch.tensor((test_e))
 print('Mean Testing Error:', 100*torch.mean(test_e).numpy(), '%')
 
 # %%
-plt.rcParams['font.family'] = 'Times New Roman' 
+""" Plotting """
+plt.rcParams['font.family'] = 'Times New Roman'
 plt.rcParams['font.size'] = 16
 plt.rcParams['mathtext.fontset'] = 'dejavuserif'
 
@@ -264,7 +272,7 @@ sample = 16
 fig = plt.figure(figsize=(12, 5), dpi=100)
 plt.subplots_adjust(wspace=0.3)
 plt.subplot(1,2,1)
-plt.imshow(xtest[sample, ...].cpu().numpy(), interpolation='nearest', cmap='rainbow', 
+plt.imshow(xtest[sample, ...].cpu().numpy(), interpolation='nearest', cmap='rainbow',
             extent=[0,1,-1,1], origin='lower', aspect='auto')
 plt.colorbar(aspect=15, pad=0.015)
 plt.title('Ground Truth', fontsize = 20) # font size doubled
@@ -275,7 +283,7 @@ plt.xlabel(r'$t$', size=12)
 plt.ylabel(r'$x$', size=12)
 
 plt.subplot(1,2,2)
-plt.imshow(xpred[sample, ...].cpu().numpy(), interpolation='nearest', cmap='rainbow', 
+plt.imshow(xpred[sample, ...].cpu().numpy(), interpolation='nearest', cmap='rainbow',
             extent=[0,1,-1,1], origin='lower', aspect='auto')
 plt.colorbar(aspect=15, pad=0.015)
 plt.title('Prediction', fontsize = 20) # font size doubled
@@ -297,10 +305,10 @@ x = torch.linspace(-1,1,h)
 sample = 16
 for i in range(3):
     plt.subplot(1,3,i+1)
-    plt.plot(x, xtest[sample,:,slices[i]], 'b-', linewidth = 2, label = 'Exact')       
+    plt.plot(x, xtest[sample,:,slices[i]], 'b-', linewidth = 2, label = 'Exact')
     plt.plot(x, xpred[sample,:,slices[i]], 'r--', linewidth = 2, label = 'Prediction')
     plt.xlabel('$x$')
-    plt.ylabel('$u(t,x)$')    
+    plt.ylabel('$u(t,x)$')
     plt.title('$t = {}$'.format(0.01*slices[i]*2), fontsize = 15)
     plt.axis('square')
     plt.xlim([-1,1])
@@ -312,10 +320,11 @@ for i in range(3):
 plt.show()
 
 # %%
-""" For saving the trained model and prediction data """
-
-torch.save(model, 'model/WNO_burgers_time_dependent')
-scipy.io.savemat('results/wno_results_burgers_time_dependent.mat', mdict={'x_test':x_test.cpu().numpy(),
+"""
+For saving the trained model and prediction data
+"""
+torch.save(model, 'model/WNO_advection_time_dependent')
+scipy.io.savemat('results/wno_results_advection_time_dependent.mat', mdict={'x_test':x_test.cpu().numpy(),
                                                     'y_test':y_test.cpu().numpy(),
-                                                    'prediction':prediction.cpu().numpy(),  
+                                                    'pred':pred.cpu().numpy(),
                                                     'test_e':test_e.cpu().numpy()})

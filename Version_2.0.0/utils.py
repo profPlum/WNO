@@ -11,10 +11,10 @@ from functools import reduce
 from functools import partial
 
 
-""" Utility functions for --loading data, 
-                          --data normalization, 
-                          --data standerdization, and 
-                          --loss evaluation 
+""" Utility functions for --loading data,
+                          --data normalization,
+                          --data standerdization, and
+                          --loss evaluation
 
 The base codes are taken from the repo: https://github.com/zongyi-li/fourier_neural_operator
 """
@@ -112,7 +112,7 @@ class UnitGaussianNormalizer(object):
     def cpu(self):
         self.mean = self.mean.cpu()
         self.std = self.std.cpu()
-        
+
     def to(self, device):
         self.mean = self.mean.to(device)
         self.std = self.std.to(device)
@@ -191,6 +191,6 @@ class LpLoss(object):
 def count_params(model):
     c = 0
     for p in list(model.parameters()):
-        c += reduce(operator.mul, 
+        c += reduce(operator.mul,
                     list(p.size()+(2,) if p.is_complex() else p.size()))
     return c

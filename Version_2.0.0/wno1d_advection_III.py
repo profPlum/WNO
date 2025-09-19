@@ -2,9 +2,9 @@
 # -*- coding: utf-8 -*-
 """
 This code belongs to the paper:
--- Tripura, T., & Chakraborty, S. (2022). Wavelet neural operator: a neural 
+-- Tripura, T., & Chakraborty, S. (2022). Wavelet neural operator: a neural
    operator for parametric partial differential equations. arXiv preprint arXiv:2205.02191.
-   
+
 This code is for 1-D wave advection equation (time-independent problem).
 """
 
@@ -33,12 +33,12 @@ class WNO1d(nn.Module):
         2. l-layers of the integral operators v(j+1)(x) = g(K.v + W.v)(x).
             --> W is defined by self.w; K is defined by self.conv.
         3. Project the output of last layer using self.fc1 and self.fc2.
-        
+
         Input : 2-channel tensor, Initial condition and location (a(x), x)
               : shape: (batchsize * x=s * c=2)
         Output: Solution of a later timestep (u(x))
               : shape: (batchsize * x=s * c=1)
-              
+
         Input parameters:
         -----------------
         width : scalar, lifting dimension of input
@@ -50,19 +50,19 @@ class WNO1d(nn.Module):
         grid_range: scalar (for 1D), right support of 1D domain
         padding   : scalar, size of zero padding
         """
-        
+
         self.level = level
         self.width = width
         self.layers = layers
         self.size = size
         self.wavelet = wavelet
         self.in_channel = in_channel
-        self.grid_range = grid_range 
+        self.grid_range = grid_range
         self.padding = padding
-        
+
         self.conv = nn.ModuleList()
         self.w = nn.ModuleList()
-        
+
         self.fc0 = nn.Linear(self.in_channel, self.width) # input channel is 2: (a(x), x)
         for i in range( self.layers ):
             self.conv.append( WaveConv1d(self.width, self.width, self.level, self.size, self.wavelet) )
@@ -76,15 +76,15 @@ class WNO1d(nn.Module):
         x = self.fc0(x)              # Shape: Batch * x * Channel
         x = x.permute(0, 2, 1)       # Shape: Batch * Channel * x
         if self.padding != 0:
-            x = F.pad(x, [0,self.padding]) 
-        
+            x = F.pad(x, [0,self.padding])
+
         for index, (convl, wl) in enumerate( zip(self.conv, self.w) ):
-            x = convl(x) + wl(x) 
-            if index != self.layers - 1:   # Final layer has no activation    
-                x = F.mish(x)        # Shape: Batch * Channel * x 
-                
+            x = convl(x) + wl(x)
+            if index != self.layers - 1:   # Final layer has no activation
+                x = F.mish(x)        # Shape: Batch * Channel * x
+
         if self.padding != 0:
-            x = x[..., :-self.padding] 
+            x = x[..., :-self.padding]
         x = x.permute(0, 2, 1)       # Shape: Batch * x * Channel
         x = F.gelu( self.fc1(x) )    # Shape: Batch * x * Channel
         x = self.fc2(x)              # Shape: Batch * x * Channel
@@ -170,7 +170,7 @@ for ep in range(epochs):
 
         optimizer.zero_grad()
         out = model(x)
-        
+
         mse = F.mse_loss(out.view(batch_size, -1), y.view(batch_size, -1))
         l2 = myloss(out.view(batch_size, -1), y.view(batch_size, -1))
         l2.backward() # l2 relative loss
@@ -192,23 +192,23 @@ for ep in range(epochs):
     train_mse /= len(train_loader)
     train_l2 /= ntrain
     test_l2 /= ntest
-    
+
     train_loss[ep] = train_l2
     test_loss[ep] = test_l2
 
     t2 = default_timer()
     print('Epoch-{}, Time-{:0.4f}, Train-MSE-{:0.4f}, Train-L2-{:0.4f}, Test-L2-{:0.4f}'
           .format(ep, t2-t1, train_mse, train_l2, test_l2))
-    
+
 # %%
 """ Prediction """
 pred = []
 test_e = []
 with torch.no_grad():
-    
+
     index = 0
     for x, y in test_loader:
-        test_l2 = 0 
+        test_l2 = 0
         x, y = x.to(device), y.to(device)
 
         out = model(x)
@@ -220,19 +220,19 @@ with torch.no_grad():
         index += 1
 
 pred = torch.cat((pred))
-test_e = torch.tensor((test_e))  
+test_e = torch.tensor((test_e))
 print('Mean Error:', 100*torch.mean(test_e).numpy())
 
 # %%
-""" Plotting """  
-plt.rcParams['font.family'] = 'Times New Roman' 
+""" Plotting """
+plt.rcParams['font.family'] = 'Times New Roman'
 plt.rcParams['font.size'] = 12
 plt.rcParams['mathtext.fontset'] = 'dejavuserif'
 
-colormap = plt.cm.jet  
+colormap = plt.cm.jet
 colors = [colormap(i) for i in np.linspace(0, 1, 5)]
 
-""" Plotting """ 
+""" Plotting """
 figure7 = plt.figure(figsize = (10, 4), dpi=300)
 index = 0
 for i in range(y_test.shape[0]):
@@ -251,5 +251,5 @@ For saving the trained model and prediction data
 torch.save(model, 'model/WNO_advection_time_independent')
 scipy.io.savemat('results/wno_results_advection_time_independent.mat', mdict={'x_test':x_test.cpu().numpy(),
                                                     'y_test':y_test.cpu().numpy(),
-                                                    'pred':pred.cpu().numpy(),  
+                                                    'pred':pred.cpu().numpy(),
                                                     'test_e':test_e.cpu().numpy()})
