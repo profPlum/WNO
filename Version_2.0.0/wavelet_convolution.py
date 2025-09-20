@@ -508,7 +508,7 @@ class WaveConv3d(nn.Module):
 
         # Use vmap to vectorize the single element function across the batch
         from torch import vmap
-        process_batch = vmap(process_element, in_dims=0, out_dims=0)
+        process_batch = vmap(process_element, in_dims=0, out_dims=0, randomness='same')
 
         # Process entire batch at once
         xr = process_batch(x)
