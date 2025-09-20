@@ -489,14 +489,14 @@ class WaveConv3d(nn.Module):
             x_coeff = list(x_coeff) # it is a tuple but needs to be mutable, no deep copy happens here
 
             # Multiply relevant Wavelet modes
-            x_coeff[0] = self.mul3d(x_coeff[0].clone(), self.weights1)
-            x_coeff[1]['aad'] = self.mul3d(x_coeff[1]['aad'].clone(), self.weights2)
-            x_coeff[1]['ada'] = self.mul3d(x_coeff[1]['ada'].clone(), self.weights3)
-            x_coeff[1]['add'] = self.mul3d(x_coeff[1]['add'].clone(), self.weights4)
-            x_coeff[1]['daa'] = self.mul3d(x_coeff[1]['daa'].clone(), self.weights5)
-            x_coeff[1]['dad'] = self.mul3d(x_coeff[1]['dad'].clone(), self.weights6)
-            x_coeff[1]['dda'] = self.mul3d(x_coeff[1]['dda'].clone(), self.weights7)
-            x_coeff[1]['ddd'] = self.mul3d(x_coeff[1]['ddd'].clone(), self.weights8)
+            x_coeff[0] = self.mul3d(x_coeff[0], self.weights1)
+            x_coeff[1]['aad'] = self.mul3d(x_coeff[1]['aad'], self.weights2)
+            x_coeff[1]['ada'] = self.mul3d(x_coeff[1]['ada'], self.weights3)
+            x_coeff[1]['add'] = self.mul3d(x_coeff[1]['add'], self.weights4)
+            x_coeff[1]['daa'] = self.mul3d(x_coeff[1]['daa'], self.weights5)
+            x_coeff[1]['dad'] = self.mul3d(x_coeff[1]['dad'], self.weights6)
+            x_coeff[1]['dda'] = self.mul3d(x_coeff[1]['dda'], self.weights7)
+            x_coeff[1]['ddd'] = self.mul3d(x_coeff[1]['ddd'], self.weights8)
 
             # Instantiate higher level coefficients as zeros
             for jj in range(2, self.level + 1):
