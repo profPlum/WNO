@@ -431,10 +431,10 @@ class WaveConv3d(nn.Module):
                 self.size = size
         else:
             raise Exception('size: WaveConv2dCwt accepts size of 3D signal is list')
-        self.wavelet = wavelet # TODO: assign pywt.Wavelet(self.wavelet) directly
+        self.wavelet = pywt.Wavelet(wavelet)
         self.mode = mode
         dummy_data = torch.randn( [*self.size] ).unsqueeze(0)
-        mode_data = wavedec3(dummy_data, pywt.Wavelet(self.wavelet), level=self.level, mode=self.mode)
+        mode_data = wavedec3(dummy_data, self.wavelet, level=self.level, mode=self.mode)
         self.modes1 = mode_data[0].shape[-3]
         self.modes2 = mode_data[0].shape[-2]
         self.modes3 = mode_data[0].shape[-1]
@@ -448,6 +448,9 @@ class WaveConv3d(nn.Module):
         self.weights6 = nn.Parameter(self.scale * torch.rand(in_channels, out_channels, self.modes1, self.modes2, self.modes3))
         self.weights7 = nn.Parameter(self.scale * torch.rand(in_channels, out_channels, self.modes1, self.modes2, self.modes3))
         self.weights8 = nn.Parameter(self.scale * torch.rand(in_channels, out_channels, self.modes1, self.modes2, self.modes3))
+
+        # single element zero tensor expanded in multiple ways
+        self.register_buffer('zero', torch.zeros([]))
 
     # Convolution
     def mul3d(self, input, weights):
@@ -483,7 +486,7 @@ class WaveConv3d(nn.Module):
         # Create a function for single element processing
         def process_element(x_element):
             # Compute single tree Discrete Wavelet coefficients
-            x_coeff = wavedec3(x_element, pywt.Wavelet(self.wavelet), level=level, mode=self.mode)
+            x_coeff = wavedec3(x_element, self.wavelet, level=level, mode=self.mode)
 
             assert type(x_coeff) in (tuple, list)
             x_coeff = list(x_coeff) # it is a tuple but needs to be mutable, no deep copy happens here
@@ -498,13 +501,14 @@ class WaveConv3d(nn.Module):
             x_coeff[1]['dda'] = self.mul3d(x_coeff[1]['dda'], self.weights7)
             x_coeff[1]['ddd'] = self.mul3d(x_coeff[1]['ddd'], self.weights8)
 
-            # Instantiate higher level coefficients as zeros
+            # Instantiate higher level coefficients as zeros (expanding mechanism is O(1))
             for jj in range(2, self.level + 1):
-                x_coeff[jj] = {key: torch.zeros([*x_coeff[jj][key].shape], device=x.device)
-                                for key in x_coeff[jj].keys()}
+                x_coeff[jj] = {key: self.zero.expand_as(x_coeff[jj][key]) for key in x_coeff[jj].keys()}
+                #x_coeff[jj] = {key: torch.zeros([*x_coeff[jj][key].shape], device=x.device) for key in x_coeff[jj].keys()}
+                # ^ original code
 
             # Return to physical space
-            return waverec3(x_coeff, pywt.Wavelet(self.wavelet))
+            return waverec3(x_coeff, self.wavelet)
 
         # Use vmap to vectorize the single element function across the batch
         from torch import vmap
