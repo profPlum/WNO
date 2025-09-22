@@ -395,7 +395,6 @@ class WaveConv2dCwt(nn.Module):
         x = icwt((out_ft, out_coeff))
         return x
 
-
 """ Def: 3d Wavelet convolutional layer """
 class WaveConv3d(nn.Module):
     def __init__(self, in_channels, out_channels, level, size, wavelet='db4', mode='periodic'):
@@ -432,6 +431,15 @@ class WaveConv3d(nn.Module):
         else:
             raise Exception('size: WaveConv2dCwt accepts size of 3D signal is list')
         self.wavelet = pywt.Wavelet(wavelet)
+
+        # pre-allocates filter bank tensors for faster computation
+        dec_lo, dec_hi, rec_lo, rec_hi = self.wavelet.filter_bank
+        self.register_buffer('_dec_lo', torch.as_tensor(dec_lo))
+        self.register_buffer('_dec_hi', torch.as_tensor(dec_hi))
+        self.register_buffer('_rec_lo', torch.as_tensor(rec_lo))
+        self.register_buffer('_rec_hi', torch.as_tensor(rec_hi))
+        self.wavelet = pywt.Wavelet(wavelet, filter_bank=[self._dec_lo, self._dec_hi, self._rec_lo, self._rec_hi])
+
         self.mode = mode
         dummy_data = torch.randn( [*self.size] ).unsqueeze(0)
         mode_data = wavedec3(dummy_data, self.wavelet, level=self.level, mode=self.mode)
