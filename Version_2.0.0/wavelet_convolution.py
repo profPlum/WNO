@@ -35,6 +35,7 @@ except ImportError:
                     For Pytorch Wavelets: $ git clone https://github.com/fbcotter/pytorch_wavelets \n \
                                           $ cd pytorch_wavelets \n \
                                           $ pip install .')
+    raise
 
 
 """ Def: 1d Wavelet convolutional layer """
