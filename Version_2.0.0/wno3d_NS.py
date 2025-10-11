@@ -63,7 +63,7 @@ class WNO3d(BasicLightningRegressor):
             raise NotImplementedError("WNO3d only supports ndims=3 (3D spatial dimensions)")
 
         # Map interface parameters
-        self.layers = n_layers
+        self.n_layers = n_layers
         self.activation = activation()
         self.grid_range = grid_range
 
@@ -88,7 +88,7 @@ class WNO3d(BasicLightningRegressor):
         self.fc2 = nn.Linear(hidden_channels, out_channels)
 
         # Add normalization layers
-        self.hidden_norm = ToggleableGroupNorm(hidden_norm_groups, hidden_channels)
+        self.hidden_norms = nn.ModuleList([ToggleableGroupNorm(hidden_norm_groups, hidden_channels) for _ in range(n_layers-1)])
         self.output_norm = ToggleableGroupNorm(out_norm_groups, out_channels)
 
     def forward(self, x):
@@ -114,9 +114,9 @@ class WNO3d(BasicLightningRegressor):
 
         for index, (convl, wl) in enumerate( zip(self.conv, self.w) ):
             x = convl(x) + wl(x)
-            if index != self.layers - 1:     # Final layer has no activation
-                x = self.activation(x)       # Shape: Batch * Channel * x * y
-                x = self.hidden_norm(x)      # Apply hidden normalization
+            if index != self.n_layers - 1:        # Final layer has no activation
+                x = self.hidden_norms[index](x)   # Apply hidden normalization
+                x = self.activation(x)            # Shape: Batch * Channel * x * y
 
         # Remove padding if required
         if any(p > 0 for p in self.padding):
