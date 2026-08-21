@@ -61,6 +61,7 @@ class WNO3d(BasicLightningRegressor):
         # Check ndims constraint
         if ndims != 3:
             raise NotImplementedError("WNO3d only supports ndims=3 (3D spatial dimensions)")
+        assert n_layers >= 3, "n_layers must be at least 3 (input, wavelet, and output layers)"
 
         # Map interface parameters
         self.n_layers = n_layers
@@ -78,7 +79,7 @@ class WNO3d(BasicLightningRegressor):
         self.fc0 = nn.Linear(in_channels + ndims, hidden_channels)
 
         # Initialize wavelet layers
-        for i in range(n_layers):
+        for i in range(n_layers-2): # discount input and output layers
             self.conv.append(WaveConv3d(hidden_channels, hidden_channels,
                                         level, size, wavelet))
             self.w.append(nn.Conv3d(hidden_channels, hidden_channels, 1))
@@ -88,7 +89,7 @@ class WNO3d(BasicLightningRegressor):
         self.fc2 = nn.Linear(hidden_channels, out_channels)
 
         # Add normalization layers
-        self.hidden_norms = nn.ModuleList([ToggleableGroupNorm(hidden_norm_groups, hidden_channels) for _ in range(n_layers-1)])
+        self.hidden_norms = nn.ModuleList([ToggleableGroupNorm(hidden_norm_groups, hidden_channels) for _ in range(n_layers)])
         self.output_norm = ToggleableGroupNorm(out_norm_groups, out_channels)
 
     def forward(self, x):
@@ -114,9 +115,8 @@ class WNO3d(BasicLightningRegressor):
 
         for index, (convl, wl) in enumerate( zip(self.conv, self.w) ):
             x = convl(x) + wl(x)
-            if index != self.n_layers - 1:        # Final layer has no activation
-                x = self.hidden_norms[index](x)   # Apply hidden normalization
-                x = self.activation(x)            # Shape: Batch * Channel * x * y
+            x = self.hidden_norms[index](x)   # Apply hidden normalization
+            x = self.activation(x)            # Shape: Batch * Channel * x * y
 
         # Remove padding if required
         if any(p > 0 for p in self.padding):
@@ -167,7 +167,7 @@ gamma = 0.5      # weight-decay rate
 wavelet = 'db6'  # wavelet basis function
 level = 2        # lavel of wavelet decomposition
 width = 40       # uplifting dimension
-layers = 4       # no of wavelet layers
+layers = 6       # no of total layers (wavelet + lifting & projection)
 
 sub = 1          # subsampling rate
 h = 64           # total grid size divided by the subsampling rate
